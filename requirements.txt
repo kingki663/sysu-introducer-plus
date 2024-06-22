@@ -1,6 +1,8 @@
 flask
 websockets
 
+docker
+
 # blivedm
 aiohttp~=3.9.0
 Brotli~=1.1.0
@@ -9,6 +11,11 @@ yarl~=1.9.3
 # llm module
 openai
 elasticsearch
+
+# llm-vector-searcher
+langchain
+langchain_openai
+langchain_community
 
 # tts module
 azure-cognitiveservices-speech

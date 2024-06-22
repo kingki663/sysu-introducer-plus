@@ -1,24 +1,12 @@
 from abc import abstractmethod, ABCMeta
-from typing import List, Dict, Callable, Self
+from typing import List, Dict, Any, Callable, Self
 from threading import Thread
-from enum import Enum
 
-from utils.config import CONFIG
+from utils.time import now, sub_time
 from message import Message
 
-from .info import ModuleStatus
-from .log.interface import ModuleLog, ModuleCallback
-
-
-class ModuleName(Enum):
-    BOOTER = "booter"
-    CORE = "core"
-    BOT = "bot"
-    CALLER = "caller"
-    SEARCHER = "searcher"
-    SPEAKER = "speaker"
-    CRAWLER = "crawler"
-    RENDERER = "renderer"
+from .info import ModuleStatus, ModuleName
+from .log import HandleLog, LOGGER
 
 
 class BasicModule(metaclass=ABCMeta):
@@ -36,12 +24,33 @@ class BasicModule(metaclass=ABCMeta):
         self.__kind = None
         self.__status = ModuleStatus.NotLoaded
         self.__sub_modules: Dict[str, Self | None]
-        self.__log_callback: ModuleCallback | None = None
+
+        # 模块的配置信息由 Cell 进行注入
+        self.__config: Dict[str, Any] = {}
 
         self.__has_injected = False
 
         # 线程相关
         self.__threads: List[Thread] = []
+
+    @staticmethod
+    def _handle_log(fn):
+        def wrapper(self: Self, *args):
+            # 如果不是在运行中调用，则
+            if self.status is not ModuleStatus.Started:
+                return fn(self, *args)
+
+            start_time = now()
+
+            # 处理结果
+            result = fn(self, *args)
+
+            # 记录处理日志
+            LOGGER.log(HandleLog(self.name, self.kind, sub_time(start_time, now())))
+
+            return result
+
+        return wrapper
 
     # 该函数主要由模块管理器统一进行管理，统一进行更新
     @abstractmethod
@@ -57,7 +66,7 @@ class BasicModule(metaclass=ABCMeta):
         """
 
     def _read_config(self) -> Dict:
-        return CONFIG.get(self.name, self.kind)
+        return self.__config
 
     # 开辟一个线程用于处理
     def _make_thread(self, target: Callable):
@@ -68,14 +77,6 @@ class BasicModule(metaclass=ABCMeta):
     def wait_threads(self):
         for thread in self.__threads:
             thread.join()
-
-    def _log(self, log: ModuleLog):
-        """发送日志, 需要由管理器注入回调函数
-
-        Args:
-            _log (Message): 日志
-        """
-        self.__log_callback(log)
 
     # ----- Hook -----
 
@@ -134,11 +135,7 @@ class BasicModule(metaclass=ABCMeta):
     # ----- 管理器依赖注入 -----
 
     def inject(
-        self,
-        name: str,
-        kind: str,
-        sub_modules: Dict[str, Self],
-        log_callback: ModuleCallback,
+        self, name: str, kind: str, sub_modules: Dict[str, Self], config: Dict[str, Any]
     ):
         """管理器初次注入信息
 
@@ -154,16 +151,21 @@ class BasicModule(metaclass=ABCMeta):
         self.__name = name
         self.__kind = kind
         self.__sub_modules = sub_modules
-
-        self.__log_callback = log_callback
+        self.__config = config
 
         self.__has_injected = True
 
     def update_status(self, status: ModuleStatus):
         self.__status = status
 
-    def update_sub_module(self, sub_module: Self):
-        self.__sub_modules[sub_module.name] = sub_module
+    def update_submodule(self, name: str, sub_module: Self):
+        """更新模块的子模块指针，由于子模块可能为空，因此需要传入名称
+
+        Args:
+            name (str): 模块名称
+            sub_module (Self): 子模块指针
+        """
+        self.__sub_modules[name] = sub_module
 
 
 class BooterInterface(BasicModule, metaclass=ABCMeta):
